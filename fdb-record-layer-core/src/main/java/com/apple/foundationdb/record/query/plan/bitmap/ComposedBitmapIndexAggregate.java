@@ -27,6 +27,9 @@ import com.apple.foundationdb.record.metadata.IndexTypes;
 import com.apple.foundationdb.record.metadata.Key;
 import com.apple.foundationdb.record.metadata.expressions.GroupingKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.KeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.NestingKeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.ShiftGroupKeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.ThenKeyExpression;
 import com.apple.foundationdb.record.provider.foundationdb.IndexAggregateGroupKeys;
 import com.apple.foundationdb.record.provider.foundationdb.IndexFunctionHelper;
 import com.apple.foundationdb.record.provider.foundationdb.indexes.BitmapValueIndexMaintainer;
@@ -202,8 +205,8 @@ public class ComposedBitmapIndexAggregate {
                 // We change the filter of the supplied builder and then immediately build it.
                 queryBuilder.setFilter(indexNode.filter);
                 final Index index = planner.getRecordMetaData().getIndex(indexNode.indexName);
-                final KeyExpression wholeKey = ((GroupingKeyExpression)index.getRootExpression()).getWholeKey();
-                final RecordQueryCoveringIndexPlan indexScan = planner.planCoveringAggregateIndex(queryBuilder.build(), index, wholeKey);
+                final RecordQueryCoveringIndexPlan indexScan = planner.planCoveringAggregateIndex(queryBuilder.build(), index,
+                        indexExpressionForPlan(index), true); // Partial view of repeated field is okay for composition.
                 if (indexScan == null) {
                     return null;
                 }
@@ -214,6 +217,23 @@ public class ComposedBitmapIndexAggregate {
         } else {
             throw new IllegalArgumentException("Unknown node type: " + node);
         }
+    }
+
+    private KeyExpression indexExpressionForPlan(@Nonnull Index index) {
+        final KeyExpression wholeKey = ((GroupingKeyExpression)index.getRootExpression()).getWholeKey();
+        if (!(wholeKey instanceof ShiftGroupKeyExpression)) {
+            return wholeKey;
+        }
+        final ShiftGroupKeyExpression shiftKey = (ShiftGroupKeyExpression)wholeKey;
+        final List<KeyExpression> keys = shiftKey.normalizeKeyForPositions();
+        // Keys after this are correlated with an earlier one and don't introduce _any more_ duplicates.
+        final int limit = keys.size() - shiftKey.getGroupedCount();
+        return new ThenKeyExpression(keys) {
+            @Override
+            public boolean createsDuplicatesAfter(int index) {
+                return createsDuplicatesBetween(index, limit);
+            }
+        };
     }
 
     static class Node {
@@ -320,8 +340,21 @@ public class ComposedBitmapIndexAggregate {
             }
             // Splice the index's key between the common grouping key and the position.
             GroupingKeyExpression groupKeyExpression = (GroupingKeyExpression)indexAggregateFunction.getOperand();
-            GroupingKeyExpression fullKey = Key.Expressions.concat(groupKeyExpression.getGroupingSubKey(), indexKey, groupKeyExpression.getGroupedSubKey())
-                    .group(groupKeyExpression.getGroupedCount());
+            boolean needShift = false;
+            if (groupKeyExpression.getWholeKey() instanceof ThenKeyExpression) {
+                final List<KeyExpression> children = ((ThenKeyExpression)groupKeyExpression.getWholeKey()).getChildren();
+                final KeyExpression lastChild = children.get(children.size() - 1);
+                if (lastChild instanceof NestingKeyExpression && lastChild.getColumnSize() > groupKeyExpression.getGroupedCount()) {
+                    needShift = true;
+                }
+            }
+            final KeyExpression splicedKey;
+            if (needShift) {
+                splicedKey = new ShiftGroupKeyExpression(Key.Expressions.concat(groupKeyExpression.getWholeKey(), indexKey), groupKeyExpression.getGroupedCount(), indexKey.getColumnSize());
+            } else {
+                splicedKey = Key.Expressions.concat(groupKeyExpression.getGroupingSubKey(), indexKey, groupKeyExpression.getGroupedSubKey());
+            }
+            final GroupingKeyExpression fullKey = new GroupingKeyExpression(splicedKey, groupKeyExpression.getGroupedCount());
             Index index = bitmapIndexes.get(fullKey);
             if (index == null) {
                 return Optional.empty();

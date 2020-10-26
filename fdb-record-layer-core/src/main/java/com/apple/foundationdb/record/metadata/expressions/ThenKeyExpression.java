@@ -123,7 +123,11 @@ public class ThenKeyExpression extends BaseKeyExpression implements KeyExpressio
     }
 
     public boolean createsDuplicatesAfter(int index) {
-        for (int i = index; i < children.size(); i++) {
+        return createsDuplicatesBetween(index, children.size());
+    }
+
+    public boolean createsDuplicatesBetween(int index, int limit) {
+        for (int i = index; i < limit; i++) {
             if (children.get(i).createsDuplicates()) {
                 return true;
             }

@@ -33,6 +33,7 @@ import com.apple.foundationdb.record.metadata.expressions.EmptyKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.GroupingKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.KeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.NestingKeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.ShiftGroupKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.ThenKeyExpression;
 
 import javax.annotation.Nonnull;
@@ -202,6 +203,14 @@ public class IndexFunctionHelper {
         if (key instanceof NestingKeyExpression) {
             final NestingKeyExpression nesting = (NestingKeyExpression)key;
             return new NestingKeyExpression(nesting.getParent(), getSubKey(nesting.getChild(), start, end));
+        }
+        if (key instanceof ShiftGroupKeyExpression) {
+            final List<KeyExpression> shifted = key.normalizeKeyForPositions();
+            if (end == start + 1) {
+                return shifted.get(start);
+            } else {
+                return new ThenKeyExpression(shifted.subList(start, end));
+            }
         }
         throw new RecordCoreException("grouping breaks apart key other than Then");
     }

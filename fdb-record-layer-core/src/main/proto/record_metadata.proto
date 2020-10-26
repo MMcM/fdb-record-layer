@@ -167,6 +167,12 @@ message Function {
   required KeyExpression arguments = 2;
 }
 
+message ShiftGroup {
+  required KeyExpression whole_key = 1;
+  optional int32 grouped_count = 2;
+  optional int32 following_grouping_count = 3;
+}
+
 message KeyExpression {
   // Exactly one of the following:
   optional Then then = 1;
@@ -181,6 +187,7 @@ message KeyExpression {
   optional KeyWithValue key_with_value = 10;
   optional RecordTypeKey record_type_key = 11;
   optional List list = 12;
+  optional ShiftGroup shift_group = 13;
 }
 
 message JoinedRecordType {

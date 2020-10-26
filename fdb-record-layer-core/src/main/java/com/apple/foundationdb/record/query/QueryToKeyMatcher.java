@@ -36,6 +36,7 @@ import com.apple.foundationdb.record.metadata.expressions.KeyWithValueExpression
 import com.apple.foundationdb.record.metadata.expressions.LiteralKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.NestingKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.RecordTypeKeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.ShiftGroupKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.ThenKeyExpression;
 import com.apple.foundationdb.record.provider.foundationdb.FDBRecordStoreBase;
 import com.apple.foundationdb.record.query.expressions.AndComponent;
@@ -108,7 +109,8 @@ public class QueryToKeyMatcher {
             FunctionKeyExpression.class,
             LiteralKeyExpression.class,
             EmptyKeyExpression.class,
-            RecordTypeKeyExpression.class
+            RecordTypeKeyExpression.class,
+            ShiftGroupKeyExpression.class
     );
 
     /**
@@ -295,6 +297,9 @@ public class QueryToKeyMatcher {
                 return Match.none();
             }
         }
+        if (key instanceof ShiftGroupKeyExpression) {
+            return matches(query, ((ShiftGroupKeyExpression) key).getWholeKey(), matchingMode, filterMask);
+        }
         if (query instanceof NestedField) {
             return matches(((NestedField) query), key, matchingMode, filterMask);
         }
@@ -359,6 +364,8 @@ public class QueryToKeyMatcher {
             return matches(query, ((GroupingKeyExpression) key).getWholeKey(), matchingMode, filterMask);
         } else if (key instanceof FieldKeyExpression) {
             return matches(query, ((FieldKeyExpression) key), filterMask);
+        } else if (key instanceof ShiftGroupKeyExpression) {
+            return matches(query, ((ShiftGroupKeyExpression) key).getWholeKey(), matchingMode, filterMask);
         } else {
             return noMatchOrUnexpected(key);
         }
@@ -379,6 +386,8 @@ public class QueryToKeyMatcher {
             return matches(query, ((GroupingKeyExpression) key).getWholeKey(), matchingMode, filterMask);
         } else if (key instanceof FieldKeyExpression) {
             return matches(query, ((FieldKeyExpression)key), filterMask);
+        } else if (key instanceof ShiftGroupKeyExpression) {
+            return matches(query, ((ShiftGroupKeyExpression) key).getWholeKey(), matchingMode, filterMask);
         } else {
             return noMatchOrUnexpected(key);
         }

@@ -1,9 +1,9 @@
 /*
- * GroupingKeyExpression.java
+ * ShiftGroupKeyExpression.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2015-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2020 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,47 +30,38 @@ import com.google.protobuf.Message;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
- * A key expression that divides into two parts for the sake of aggregate or rank indexing.
- * Zero or more <i>grouping</i> columns determine a subindex within which an aggregate or ranking is maintained.
- * The remaining (up to <code>Index.getColumnSize()</code>) <i>grouped</i> columns are the value to be aggregated / ranked.
+ * A key expression that shifts grouping keys that come after the grouped key so that the entire grouped key is properly on the right.
+ * This is needed in cases where a nested concatenated key contains both a grouping key and a grouped key and other grouping keys follow.
+ * Since there is no way for the nested {@code concat} expression to include field from the parent, the order needs to be changed afterwards.
  */
-@API(API.Status.MAINTAINED)
-public class GroupingKeyExpression extends BaseKeyExpression implements KeyExpressionWithChild {
+@API(API.Status.EXPERIMENTAL)
+public class ShiftGroupKeyExpression extends BaseKeyExpression implements KeyExpressionWithoutChildren {
     @Nonnull
     private final KeyExpression wholeKey;
     private final int groupedCount;
+    private final int followingGroupingCount;
 
-    public GroupingKeyExpression(@Nonnull KeyExpression wholeKey, int groupedCount) {
+    public ShiftGroupKeyExpression(@Nonnull KeyExpression wholeKey, int groupedCount, int followingGroupingCount) {
         this.wholeKey = wholeKey;
         this.groupedCount = groupedCount;
+        this.followingGroupingCount = followingGroupingCount;
     }
 
-    public GroupingKeyExpression(@Nonnull RecordMetaDataProto.Grouping grouping) throws DeserializationException {
-        this(KeyExpression.fromProto(grouping.getWholeKey()), grouping.getGroupedCount());
-    }
-
-    public static GroupingKeyExpression of(@Nonnull KeyExpression groupedValue, @Nonnull KeyExpression groupByFirst, @Nonnull KeyExpression... groupByRest) {
-        KeyExpression wholeKeyFirst = groupByFirst;
-        KeyExpression wholeKeySecond;
-        KeyExpression[] wholeKeyRest = new KeyExpression[groupByRest.length];
-        if (wholeKeyRest.length == 0) {
-            wholeKeySecond = groupedValue;
-        } else {
-            wholeKeySecond = groupByRest[0];
-            System.arraycopy(groupByRest, 1, wholeKeyRest, 0, groupByRest.length - 1);
-            wholeKeyRest[wholeKeyRest.length - 1] = groupedValue;
-        }
-        return new GroupingKeyExpression(Key.Expressions.concat(wholeKeyFirst, wholeKeySecond, wholeKeyRest),
-                groupedValue.getColumnSize());
+    public ShiftGroupKeyExpression(@Nonnull RecordMetaDataProto.ShiftGroup shiftGroup) throws DeserializationException {
+        this(KeyExpression.fromProto(shiftGroup.getWholeKey()), shiftGroup.getGroupedCount(), shiftGroup.getFollowingGroupingCount());
     }
 
     @Nonnull
     @Override
     public <M extends Message> List<Key.Evaluated> evaluateMessage(@Nullable FDBRecord<M> record, @Nullable Message message) {
-        return getWholeKey().evaluateMessage(record, message);
+        return getWholeKey().evaluateMessage(record, message).stream()
+            .map(v -> Key.Evaluated.concatenate(shift(v.values())))
+            .collect(Collectors.toList());
     }
 
     @Override
@@ -90,29 +81,30 @@ public class GroupingKeyExpression extends BaseKeyExpression implements KeyExpre
 
     @Nonnull
     @Override
-    public RecordMetaDataProto.Grouping toProto() throws SerializationException {
-        final RecordMetaDataProto.Grouping.Builder builder = RecordMetaDataProto.Grouping.newBuilder();
+    public RecordMetaDataProto.ShiftGroup toProto() throws SerializationException {
+        final RecordMetaDataProto.ShiftGroup.Builder builder = RecordMetaDataProto.ShiftGroup.newBuilder();
         builder.setWholeKey(getWholeKey().toKeyExpression());
         builder.setGroupedCount(groupedCount);
+        builder.setFollowingGroupingCount(followingGroupingCount);
         return builder.build();
     }
 
     @Nonnull
     @Override
     public RecordMetaDataProto.KeyExpression toKeyExpression() {
-        return RecordMetaDataProto.KeyExpression.newBuilder().setGrouping(toProto()).build();
+        return RecordMetaDataProto.KeyExpression.newBuilder().setShiftGroup(toProto()).build();
     }
 
     @Nonnull
     @Override
     public List<KeyExpression> normalizeKeyForPositions() {
-        return getWholeKey().normalizeKeyForPositions();
+        return shift(getWholeKey().normalizeKeyForPositions());
     }
 
     @Nonnull
     @Override
     public KeyExpression normalizeForPlanner(@Nonnull Source source, @Nonnull List<String> fieldNamePrefix) {
-        return new GroupingKeyExpression(wholeKey.normalizeForPlanner(source, fieldNamePrefix), groupedCount);
+        return new ShiftGroupKeyExpression(wholeKey.normalizeForPlanner(source, fieldNamePrefix), groupedCount, followingGroupingCount);
     }
 
     @Override
@@ -130,41 +122,18 @@ public class GroupingKeyExpression extends BaseKeyExpression implements KeyExpre
         return wholeKey;
     }
 
-    @Override
-    @Nonnull
-    public KeyExpression getChild() {
-        return getGroupingSubKey();
-    }
-
     public int getGroupedCount() {
         return groupedCount;
     }
 
-    /**
-     * Get number of leading columns that select the group (e.g., ranked set or atomic aggregate);
-     * remaining fields are the value (e.g., score) within the set.
-     * @return the number of leading columns that select the group
-     * @see #getGroupedCount()
-     */
-    @Nonnull
-    public int getGroupingCount() {
-        return getColumnSize() - groupedCount;
-    }
-
-    @Nonnull
-    public KeyExpression getGroupedSubKey() {
-        return getWholeKey().getSubKey(getGroupingCount(), getColumnSize());
-    }
-
-    @Nonnull
-    public KeyExpression getGroupingSubKey() {
-        return getWholeKey().getSubKey(0, getGroupingCount());
+    public int getFollowingGroupingCount() {
+        return followingGroupingCount;
     }
 
     @Override
     public String toString() {
         StringBuilder str = new StringBuilder(getWholeKey().toString());
-        str.append(" group ").append(groupedCount);
+        str.append(" shift ").append(followingGroupingCount).append(" over ").append(groupedCount);
         return str.toString();
     }
 
@@ -178,19 +147,30 @@ public class GroupingKeyExpression extends BaseKeyExpression implements KeyExpre
             return false;
         }
 
-        GroupingKeyExpression that = (GroupingKeyExpression)o;
-        return this.getWholeKey().equals(that.getWholeKey()) && (this.groupedCount == that.groupedCount);
+        ShiftGroupKeyExpression that = (ShiftGroupKeyExpression)o;
+        return this.getWholeKey().equals(that.getWholeKey()) &&
+            (this.groupedCount == that.groupedCount) &&
+            (this.followingGroupingCount == that.followingGroupingCount);
     }
 
     @Override
     public int hashCode() {
         int hash = getWholeKey().hashCode();
         hash += groupedCount;
+        hash += followingGroupingCount;
         return hash;
     }
 
     @Override
     public int planHash() {
-        return getWholeKey().planHash() + groupedCount;
+        return getWholeKey().planHash() + groupedCount + followingGroupingCount;
+    }
+
+    private <T> List<T> shift(@Nonnull List<T> unshifted) {
+        List<T> shifted = new ArrayList<>(unshifted.size());
+        shifted.addAll(unshifted.subList(0, unshifted.size() - groupedCount - followingGroupingCount));
+        shifted.addAll(unshifted.subList(unshifted.size() - followingGroupingCount, unshifted.size()));
+        shifted.addAll(unshifted.subList(unshifted.size() - groupedCount - followingGroupingCount, unshifted.size() - followingGroupingCount));
+        return shifted;
     }
 }

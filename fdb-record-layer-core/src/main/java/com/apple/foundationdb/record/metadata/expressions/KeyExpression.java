@@ -352,6 +352,10 @@ public interface KeyExpression extends PlanHashable {
             found++;
             root = RecordTypeKeyExpression.RECORD_TYPE_KEY;
         }
+        if (expression.hasShiftGroup()) {
+            found++;
+            root = new ShiftGroupKeyExpression(expression.getShiftGroup());
+        }
         if (root == null || found > 1) {
             throw new DeserializationException("Exactly one root must be specified for an index");
         }

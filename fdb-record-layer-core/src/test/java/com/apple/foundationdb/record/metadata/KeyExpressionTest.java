@@ -24,6 +24,7 @@ import com.apple.foundationdb.record.RecordCoreException;
 import com.apple.foundationdb.record.UnstoredRecord;
 import com.apple.foundationdb.record.metadata.ExpressionTestsProto.Customer;
 import com.apple.foundationdb.record.metadata.ExpressionTestsProto.NestedField;
+import com.apple.foundationdb.record.metadata.ExpressionTestsProto.Shifty;
 import com.apple.foundationdb.record.metadata.ExpressionTestsProto.SubString;
 import com.apple.foundationdb.record.metadata.ExpressionTestsProto.SubStrings;
 import com.apple.foundationdb.record.metadata.ExpressionTestsProto.TestScalarFieldAccess;
@@ -36,6 +37,7 @@ import com.apple.foundationdb.record.metadata.expressions.KeyExpression.FanType;
 import com.apple.foundationdb.record.metadata.expressions.ListKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.NestingKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.QueryableKeyExpression;
+import com.apple.foundationdb.record.metadata.expressions.ShiftGroupKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.SplitKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.ThenKeyExpression;
 import com.apple.foundationdb.record.provider.foundationdb.FDBRecord;
@@ -210,6 +212,13 @@ public class KeyExpressionTest {
             .addSubstrings(SubString.newBuilder().setContent("mike").setStart(2).setEnd(4))
             .addSubstrings(SubString.newBuilder().setContent("jay").setStart(0).setEnd(1))
             .addSubstrings(SubString.newBuilder().setContent("christos").setStart(5).setEnd(8))
+            .build();
+
+    public static final Shifty shifty = Shifty.newBuilder()
+            .setName("top")
+            .addKeyValues(Shifty.KeyValue.newBuilder().setKey("one").setValue("a"))
+            .addKeyValues(Shifty.KeyValue.newBuilder().setKey("two").setValue("b"))
+            .addKeyValues(Shifty.KeyValue.newBuilder().setKey("three").setValue("c"))
             .build();
 
     /**
@@ -752,6 +761,19 @@ public class KeyExpressionTest {
                 concatenate("numbers", "four", "five", "six"),
                 concatenate("numbers", "seven", "eight", "nine")),
                 evaluate(splitConcat, numbers));
+    }
+
+    @Test
+    public void testShift() throws Exception {
+        final ShiftGroupKeyExpression shift = new ShiftGroupKeyExpression(
+                                                                          concat(field("keyValues", FanType.FanOut).nest(concatenateFields("key", "value")), field("top")),
+                                                                          1, 1);
+        shift.validate(Shifty.getDescriptor());
+        assertEquals(Arrays.asList(
+                concatenate("one", "top", "a"),
+                concatenate("two", "top", "b"),
+                concatenate("three", "top", "c")),
+                evaluate(shift, shifty));
     }
 
     public static Stream<Arguments> getPrefixKeyComparisons() {

@@ -31,6 +31,7 @@ import com.apple.foundationdb.record.query.plan.plans.RecordQueryCoveringIndexPl
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryFetchFromPartialRecordPlan;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryPlan;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryPlanWithIndex;
+import com.apple.foundationdb.record.query.plan.plans.RecordQueryTypeFilterPlan;
 import com.google.common.collect.Iterables;
 
 import javax.annotation.Nonnull;
@@ -114,6 +115,33 @@ public abstract class RecordQueryPlannerSubstitutionVisitor {
             if (fetchPlan.getChild().getAvailableFields().containsAll(requiredFields)) {
                 return ((RecordQueryFetchFromPartialRecordPlan)plan).getChild();
             }
+        } else if (plan instanceof RecordQueryTypeFilterPlan) {
+            RecordQueryTypeFilterPlan typeFilterPlan = (RecordQueryTypeFilterPlan)plan;
+            RecordQueryPlan inner = typeFilterPlan.getInnerPlan();
+            if (!(inner instanceof RecordQueryPlanWithIndex)) {
+                return null;
+            }
+            RecordQueryPlanWithIndex indexPlan = (RecordQueryPlanWithIndex)inner;
+            Index index = recordMetaData.getIndex(indexPlan.getIndexName());
+            Collection<String> recordTypes = typeFilterPlan.getRecordTypes();
+            if (recordTypes.size() != 1) {
+                return null;
+            }
+            final RecordType recordType = recordMetaData.getRecordType(Iterables.getOnlyElement(recordTypes));
+            AvailableFields fieldsFromIndex = AvailableFields.fromIndex(recordType, index, indexTypes, commonPrimaryKey, indexPlan);
+
+            Set<KeyExpression> fields = new HashSet<>(requiredFields);
+            if (commonPrimaryKey != null) {
+                // Need the primary key, even if it wasn't one of the explicit result fields.
+                fields.addAll(commonPrimaryKey.normalizeKeyForPositions());
+            }
+
+            if (fieldsFromIndex.containsAll(fields)) {
+                final IndexKeyValueToPartialRecord keyValueToPartialRecord = fieldsFromIndex.buildIndexKeyValueToPartialRecord(recordType).build();
+                if (keyValueToPartialRecord != null) {
+                    return new RecordQueryCoveringIndexPlan(indexPlan, recordType.getName(), fieldsFromIndex, keyValueToPartialRecord);
+                }
+            }
         }
         return null;
     }
@@ -142,6 +170,20 @@ public abstract class RecordQueryPlannerSubstitutionVisitor {
         } else if (plan instanceof RecordQueryFetchFromPartialRecordPlan) {
             RecordQueryFetchFromPartialRecordPlan fetchPlan = (RecordQueryFetchFromPartialRecordPlan) plan;
             return fetchPlan.getChild().getAvailableFields();
+        } else if (plan instanceof RecordQueryTypeFilterPlan) {
+            RecordQueryTypeFilterPlan typeFilterPlan = (RecordQueryTypeFilterPlan)plan;
+            RecordQueryPlan inner = typeFilterPlan.getInnerPlan();
+            if (!(inner instanceof RecordQueryPlanWithIndex)) {
+                return AvailableFields.NO_FIELDS;
+            }
+            RecordQueryPlanWithIndex indexPlan = (RecordQueryPlanWithIndex)inner;
+            Index index = recordMetaData.getIndex(indexPlan.getIndexName());
+            Collection<String> recordTypes = typeFilterPlan.getRecordTypes();
+            if (recordTypes.size() != 1) {
+                return AvailableFields.NO_FIELDS;
+            }
+            final RecordType recordType = recordMetaData.getRecordType(Iterables.getOnlyElement(recordTypes));
+            return AvailableFields.fromIndex(recordType, index, indexTypes, commonPrimaryKey, indexPlan);
         }
         return AvailableFields.NO_FIELDS;
     }

@@ -37,6 +37,7 @@ import com.apple.foundationdb.record.query.expressions.QueryKeyExpressionWithCom
 import com.apple.foundationdb.record.query.expressions.QueryKeyExpressionWithOneOfComparison;
 import com.apple.foundationdb.record.query.plan.AvailableFields;
 import com.apple.foundationdb.record.query.plan.PlannableIndexTypes;
+import com.apple.foundationdb.record.query.plan.plans.RecordQueryTypeFilterPlan;
 import com.apple.foundationdb.record.query.plan.plans.TranslateValueFunction;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryFetchFromPartialRecordPlan;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryFilterPlan;
@@ -67,7 +68,7 @@ public class FilterVisitor extends RecordQueryPlannerSubstitutionVisitor {
             final RecordQueryFilterPlan filterPlan = (RecordQueryFilterPlan)recordQueryPlan;
 
             final List<QueryComponent> filters = filterPlan.getFilters();
-            final AvailableFields availableFields = availableFields(((RecordQueryFilterPlan)recordQueryPlan).getInnerPlan());
+            final AvailableFields availableFields = availableFields(filterPlan.getInnerPlan());
 
             // Partition the filters according to whether they can be evaluated using just the fields from the index or
             // if they need a full record.
@@ -88,7 +89,8 @@ public class FilterVisitor extends RecordQueryPlannerSubstitutionVisitor {
                 return recordQueryPlan;
             }
 
-            @Nullable RecordQueryPlan removedFetchPlan = removeIndexFetch(filterPlan.getChild(), allReferencedFields);
+            final RecordQueryPlan inner = filterPlan.getInnerPlan();
+            @Nullable RecordQueryPlan removedFetchPlan = removeIndexFetch(inner, allReferencedFields);
             if (removedFetchPlan == null) {
                 return recordQueryPlan;
             }
@@ -97,6 +99,10 @@ public class FilterVisitor extends RecordQueryPlannerSubstitutionVisitor {
                     new RecordQueryFilterPlan(removedFetchPlan, indexFilters),
                     TranslateValueFunction.unableToTranslate(),
                     new Type.Any());
+
+            if (inner instanceof RecordQueryTypeFilterPlan) {
+                recordQueryPlan = new RecordQueryTypeFilterPlan(recordQueryPlan, ((RecordQueryTypeFilterPlan)inner).getRecordTypes());
+            }
 
             if (!residualFilters.isEmpty()) {
                 recordQueryPlan = new RecordQueryFilterPlan(recordQueryPlan, residualFilters);

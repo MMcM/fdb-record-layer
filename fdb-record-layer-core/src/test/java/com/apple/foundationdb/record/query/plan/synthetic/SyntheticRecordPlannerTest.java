@@ -67,6 +67,7 @@ import com.apple.foundationdb.record.query.plan.cascades.matching.structure.Reco
 import com.apple.foundationdb.record.query.plan.match.PlanMatchers;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryPlan;
 import com.apple.foundationdb.tuple.Tuple;
+import com.apple.test.BooleanSource;
 import com.apple.test.Tags;
 import com.google.common.base.Verify;
 import com.google.common.collect.HashMultiset;
@@ -82,6 +83,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -877,6 +879,53 @@ public class SyntheticRecordPlannerTest {
             List<Tuple> expected1 = Arrays.asList(Tuple.from(2, 3, -1, Tuple.from(1), Tuple.from(1001)));
             List<Tuple> results1 = recordStore.scanIndex(index, IndexScanType.BY_VALUE, range, null, ScanProperties.FORWARD_SCAN).map(IndexEntry::getKey).asList().join();
             assertEquals(expected1, results1);
+        }
+    }
+
+    @ParameterizedTest
+    @BooleanSource
+    public void buildOuterJoinIndex(boolean before) throws Exception {
+        metaDataBuilder.addIndex("MySimpleRecord", "other_rec_no");
+        final JoinedRecordTypeBuilder joined = metaDataBuilder.addJoinedRecordType("Simple_Other");
+        joined.addConstituent("simple", "MySimpleRecord");
+        joined.addConstituent("other", metaDataBuilder.getRecordType("MyOtherRecord"), true);
+        joined.addJoin("simple", "other_rec_no", "other", "rec_no");
+        Index index = new Index("simple.num_value_2_other.num_value_3", concat(field("simple").nest("num_value_2"), field("other").nest("num_value_3")));
+
+        if (before) {
+            metaDataBuilder.addIndex(joined, index);
+        }
+
+        try (FDBRecordContext context = openContext()) {
+            final FDBRecordStore recordStore = recordStoreBuilder.setContext(context).create();
+
+            for (int i = 0; i < 3; i++) {
+                TestRecordsJoinIndexProto.MySimpleRecord.Builder simple = TestRecordsJoinIndexProto.MySimpleRecord.newBuilder();
+                simple.setRecNo(i).setOtherRecNo(1000 + i);
+                simple.setNumValue2(i * 2);
+                recordStore.saveRecord(simple.build());
+                TestRecordsJoinIndexProto.MyOtherRecord.Builder other = TestRecordsJoinIndexProto.MyOtherRecord.newBuilder();
+                other.setRecNo(1000 + i);
+                other.setNumValue3(i * 3);
+                recordStore.saveRecord(other.build());
+            }
+
+            context.commit();
+        }
+
+        if (!before) {
+            metaDataBuilder.addIndex(joined, index);
+        }
+
+        try (FDBRecordContext context = openContext()) {
+            final FDBRecordStore recordStore = recordStoreBuilder.setContext(context).open();
+
+            List<Tuple> entries = recordStore.scanIndex(index, IndexScanType.BY_VALUE, TupleRange.ALL, null, ScanProperties.FORWARD_SCAN).map(IndexEntry::getKey).asList().join();
+            assertEquals(List.of(
+                            Tuple.from(0, 0, -1, Tuple.from(0L), Tuple.from(1000L)),
+                            Tuple.from(2, 3, -1, Tuple.from(1L), Tuple.from(1001L)),
+                            Tuple.from(4, 6, -1, Tuple.from(2L), Tuple.from(1002L))),
+                    entries);
         }
     }
 

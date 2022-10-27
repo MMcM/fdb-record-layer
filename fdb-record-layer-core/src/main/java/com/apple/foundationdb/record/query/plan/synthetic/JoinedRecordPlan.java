@@ -33,9 +33,11 @@ import com.apple.foundationdb.record.metadata.JoinedRecordType;
 import com.apple.foundationdb.record.metadata.Key;
 import com.apple.foundationdb.record.metadata.expressions.KeyExpression;
 import com.apple.foundationdb.record.provider.foundationdb.FDBQueriedRecord;
+import com.apple.foundationdb.record.provider.foundationdb.FDBRecord;
 import com.apple.foundationdb.record.provider.foundationdb.FDBRecordStore;
 import com.apple.foundationdb.record.provider.foundationdb.FDBStoredRecord;
 import com.apple.foundationdb.record.provider.foundationdb.FDBSyntheticRecord;
+import com.apple.foundationdb.record.query.plan.cascades.typing.TypeRepository;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryPlan;
 import com.google.protobuf.Message;
 
@@ -46,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -65,6 +68,8 @@ class JoinedRecordPlan implements SyntheticRecordFromStoredRecordPlan  {
     private final List<JoinedType> joinedTypes;
     @Nonnull
     private final List<RecordQueryPlan> queries;
+    @Nullable
+    private final JoinedRecordLastOuterJoinedTester outerJoinedTester;
 
     protected static class JoinedType implements PlanHashable {
         private static final ObjectPlanHash BASE_HASH = new ObjectPlanHash("Joined-Type");
@@ -136,7 +141,7 @@ class JoinedRecordPlan implements SyntheticRecordFromStoredRecordPlan  {
             this.singleton = singleton;
         }
 
-        public <M extends Message> Object evaluate(@Nullable FDBStoredRecord<M> record) {
+        public <M extends Message> Object evaluate(@Nullable FDBRecord<M> record) {
             if (singleton) {
                 return toValue(expression.evaluateSingleton(record));
             } else {
@@ -194,7 +199,8 @@ class JoinedRecordPlan implements SyntheticRecordFromStoredRecordPlan  {
         }
     }
 
-    public JoinedRecordPlan(@Nonnull JoinedRecordType joinedRecordType, @Nonnull List<JoinedType> joinedTypes, @Nonnull List<RecordQueryPlan> queries) {
+    public JoinedRecordPlan(@Nonnull JoinedRecordType joinedRecordType, @Nonnull List<JoinedType> joinedTypes,
+                            @Nonnull List<RecordQueryPlan> queries, @Nullable JoinedRecordLastOuterJoinedTester outerJoinedTester) {
         if (joinedTypes.size() != joinedRecordType.getConstituents().size()) {
             throw new RecordCoreArgumentException("should join all constituents");
         }
@@ -210,6 +216,7 @@ class JoinedRecordPlan implements SyntheticRecordFromStoredRecordPlan  {
         this.joinedRecordType = joinedRecordType;
         this.joinedTypes = joinedTypes;
         this.queries = queries;
+        this.outerJoinedTester = outerJoinedTester;
     }
 
     @Override
@@ -345,4 +352,83 @@ class JoinedRecordPlan implements SyntheticRecordFromStoredRecordPlan  {
                 throw new UnsupportedOperationException("Hash kind " + hashKind.name() + " is not supported");
         }
     }
+
+    protected static class JoinedRecordLastOuterJoinedTester implements PlanHashable {
+        private static final ObjectPlanHash BASE_HASH = new ObjectPlanHash("OuterJoin-Tester");
+
+        @Nonnull
+        protected final List<BindingPlan> bindingPlans;
+        @Nonnull
+        protected final RecordQueryPlan query;
+        @Nonnull
+        protected final List<String> nulledConstituents;
+
+        public JoinedRecordLastOuterJoinedTester(@Nonnull List<BindingPlan> bindingPlans, @Nonnull RecordQueryPlan query,
+                                                 @Nonnull List<String> nulledConstituents) {
+            this.bindingPlans = bindingPlans;
+            this.query = query;
+            this.nulledConstituents = nulledConstituents;
+        }
+
+        public <M extends Message> CompletableFuture<Boolean> isLastOuterJoined(@Nonnull FDBRecordStore store,
+                                                                                @Nonnull FDBSyntheticRecord syntheticRecord,
+                                                                                @Nonnull FDBStoredRecord<M> constituent) {
+            final EvaluationContextBuilder builder = EvaluationContext.newBuilder();
+            for (BindingPlan bindingPlan : bindingPlans) {
+                builder.setBinding(bindingPlan.name, bindingPlan.evaluate(syntheticRecord));
+            }
+            final EvaluationContext context = builder.build(TypeRepository.EMPTY_SCHEMA);
+            return query.execute(store, context)
+                    .filter(r -> !r.getPrimaryKey().equals(constituent.getPrimaryKey()))
+                    .first()
+                    .thenApply(Optional::isEmpty);
+        }
+
+        @Nonnull
+        public FDBSyntheticRecord nulledSyntheticRecord(@Nonnull FDBSyntheticRecord syntheticRecord) {
+            final Map<String, FDBStoredRecord<? extends Message>> constituents = new HashMap<>(syntheticRecord.getConstituents());
+            for (String name : nulledConstituents) {
+                constituents.remove(name);
+            }
+            return FDBSyntheticRecord.of(syntheticRecord.getRecordType(), constituents);
+        }
+
+        @Nonnull
+        public List<BindingPlan> getBindingPlans() {
+            return bindingPlans;
+        }
+
+        @Nonnull
+        public RecordQueryPlan getQuery() {
+            return query;
+        }
+
+        @Override
+        public String toString() {
+            return bindingPlans + ": " + query;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            final JoinedRecordLastOuterJoinedTester that = (JoinedRecordLastOuterJoinedTester)o;
+            return bindingPlans.equals(that.bindingPlans) && query.equals(that.query);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(bindingPlans, query);
+        }
+
+        @Override
+        public int planHash(@Nonnull final PlanHashKind hashKind) {
+            return PlanHashable.objectsPlanHash(hashKind, BASE_HASH, bindingPlans, query);
+        }
+    }
+
 }

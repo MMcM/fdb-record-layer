@@ -22,6 +22,7 @@ package com.apple.foundationdb.record.query.plan.synthetic;
 
 import com.apple.foundationdb.record.RecordCoreException;
 import com.apple.foundationdb.record.metadata.JoinedRecordType;
+import com.apple.foundationdb.record.metadata.Key;
 import com.apple.foundationdb.record.metadata.expressions.FieldKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.InvertibleFunctionKeyExpression;
 import com.apple.foundationdb.record.metadata.expressions.KeyExpression;
@@ -38,6 +39,7 @@ import com.apple.foundationdb.record.query.plan.RecordQueryPlanner;
 import com.apple.foundationdb.record.query.plan.plans.RecordQueryPlan;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -176,7 +178,8 @@ class JoinedRecordPlanner {
             // pendingJoins are removed by buildQuery as both sides become bound, so the plan must be incomplete.
             throw new RecordCoreException("did not perform all joins");
         }
-        return new JoinedRecordPlan(joinedRecordType, joinedTypes, queries);
+        final JoinedRecordPlan.JoinedRecordLastOuterJoinedTester outerJoinedTester = buildOuterJoinedTester(joinConstituent);
+        return new JoinedRecordPlan(joinedRecordType, joinedTypes, queries, outerJoinedTester);
     }
 
     @SuppressWarnings("PMD.CompareObjectsWithEquals")
@@ -269,5 +272,50 @@ class JoinedRecordPlanner {
         } else {
             throw new RecordCoreException("unsupported join key expression: " + expression);
         }
+    }
+
+    @Nullable
+    private JoinedRecordPlan.JoinedRecordLastOuterJoinedTester buildOuterJoinedTester(@Nonnull JoinedRecordType.JoinConstituent joinConstituent) {
+        if (!joinConstituent.isOuterJoined()) {
+            return null;
+        }
+        final List<JoinedRecordPlan.BindingPlan> bindingPlans = new ArrayList<>();
+        final List<String> nulledConstituents = new ArrayList<>();
+        nulledConstituents.add(joinConstituent.getName());
+        final List<QueryComponent> conditions = new ArrayList<>();
+        for (JoinedRecordType.Join join : joinedRecordType.getJoins()) {
+            JoinedRecordType.JoinConstituent otherConstituent;
+            KeyExpression expression;
+            KeyExpression otherExpression;
+            if (join.getLeft() == joinConstituent) {
+                otherConstituent = join.getRight();
+                expression = join.getLeftExpression();
+                otherExpression = join.getRightExpression();
+            } else if (join.getRight() == joinConstituent) {
+                otherConstituent = join.getLeft();
+                expression = join.getRightExpression();
+                otherExpression = join.getLeftExpression();
+            } else {
+                continue;
+            }
+            if (otherConstituent.isOuterJoined()) {
+                // TODO: Probably not good enough. Check whether any other joins to it?
+                nulledConstituents.add(otherConstituent.getName());
+                continue;
+            }
+            final JoinedRecordPlan.BindingPlan bindingPlan = new JoinedRecordPlan.BindingPlan(String.format("_j%d", ++bindingCounter),
+                    Key.Expressions.field(otherConstituent.getName()).nest(otherExpression),
+                    !otherExpression.createsDuplicates());
+            bindingPlans.add(bindingPlan);
+            final Comparisons.Comparison comparison = new Comparisons.ParameterComparison(bindingPlan.singleton ? Comparisons.Type.EQUALS : Comparisons.Type.IN, bindingPlan.name);
+            conditions.add(buildCondition(expression, comparison));
+        }
+        RecordQuery.Builder builder = RecordQuery.newBuilder();
+        builder.setRecordType(joinConstituent.getRecordType().getName());
+        if (!conditions.isEmpty()) {
+            builder.setFilter(conditions.size() > 1 ? Query.and(conditions) : conditions.get(0));
+        }
+        final RecordQueryPlan query = queryPlanner.plan(builder.build());
+        return new JoinedRecordPlan.JoinedRecordLastOuterJoinedTester(bindingPlans, query, nulledConstituents);
     }
 }

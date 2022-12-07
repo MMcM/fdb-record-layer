@@ -1780,7 +1780,7 @@ public class RecordQueryPlanner implements QueryPlanner {
     @Nullable
     public RecordQueryCoveringIndexPlan planCoveringAggregateIndex(@Nonnull RecordQuery query, @Nonnull Index index, @Nonnull KeyExpression indexExpr) {
         final Collection<RecordType> recordTypes = metaData.recordTypesForIndex(index);
-        if (recordTypes.size() != 1) {
+        if (recordTypes.size() != 1 && false) {
             // Unfortunately, since we materialize partial records, we need a unique type for them.
             return null;
         }
@@ -1790,8 +1790,15 @@ public class RecordQueryPlanner implements QueryPlanner {
         // Repeated fields will be scanned one at a time by covering aggregate, so there is no issue with fan out.
         planContext.allowDuplicates = true;
         final CandidateScan candidateScan = new CandidateScan(planContext, index, query.isSortReverse());
-        final ScoredPlan scoredPlan = planCandidateScan(candidateScan, indexExpr,
+        final ScoredPlan scoredPlan;
+        if (query.getFilter() != null) {
+            scoredPlan = planCandidateScan(candidateScan, indexExpr,
                 BooleanNormalizer.forConfiguration(configuration).normalizeIfPossible(query.getFilter()), query.getSort());
+        } else if (query.getSort() != null) {
+            scoredPlan = planSortOnly(candidateScan, indexExpr, query.getSort());
+        } else {
+            scoredPlan = new ScoredPlan(0, valueScan(candidateScan, null, false));
+        }
         // It would be possible to handle unsatisfiedFilters if they, too, only involved group key (covering) fields.
         if (scoredPlan == null || !scoredPlan.unsatisfiedFilters.isEmpty() || !(scoredPlan.plan instanceof RecordQueryIndexPlan)) {
             return null;

@@ -72,9 +72,7 @@ public abstract class IndexAggregateGroupKeys {
                                                                           @Nullable QueryComponent conditions) {
         final KeyExpression groupingKey = IndexFunctionHelper.getGroupingKey(operand);
         if (conditions == null) {
-            if (groupingKey.getColumnSize() == 0) {
-                return Optional.of(new Conditions(Collections.emptyList()));
-            }
+            return Optional.of(new Conditions(Collections.emptyList()));
         } else {
             final QueryToKeyMatcher matcher = new QueryToKeyMatcher(conditions);
             final QueryToKeyMatcher.Match match = matcher.matchesSatisfyingQuery(groupingKey);

@@ -51,6 +51,7 @@
           <entry name="$USER_HOME$/.gradle/caches/modules-2/files-2.1/com.google.j2objc/j2objc-annotations/1.3/ba035118bc8bac37d7eff77700720999acd9986d/j2objc-annotations-1.3.jar" />
         </processorPath>
         <module name="fdb-record-layer.fdb-record-layer-lucene.test" />
+        <module name="fdb-record-layer.fdb-record-layer-rocks-direct.main" />
         <module name="fdb-record-layer.fdb-record-layer-spatial.main" />
         <module name="fdb-record-layer.fdb-extensions.test" />
         <module name="fdb-record-layer.fdb-record-layer-core.test" />

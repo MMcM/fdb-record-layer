@@ -1,0 +1,54 @@
+/*
+ * fdb-record-layer-rocks-direct.gradle
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2015-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+def coreProject = ":${ext.coreProjectName}"
+dependencies {
+    api project(coreProject)
+    implementation "org.rocksdb:rocksdbjni:${rocksVersion}"
+    implementation "com.google.protobuf:protobuf-java:${protobufVersion}"
+    implementation "org.apache.commons:commons-lang3:${commonsLang3Version}"
+    implementation "org.slf4j:slf4j-api:${slf4jVersion}"
+    compileOnly "com.google.code.findbugs:jsr305:${jsr305Version}"
+    compileOnly "com.google.auto.service:auto-service:undefined"
+    annotationProcessor "com.google.auto.service:auto-service:undefined"
+
+    testImplementation project(path: ':fdb-extensions', configuration: 'tests')
+    testImplementation project(path: coreProject, configuration: 'tests')
+    testImplementation "org.hamcrest:hamcrest:${hamcrestVersion}"
+    testCompileOnly "com.google.code.findbugs:jsr305:${jsr305Version}"
+    testCompileOnly "com.google.auto.service:auto-service:undefined"
+    testRuntimeOnly "org.apache.logging.log4j:log4j-slf4j-impl:${log4jVersion}"
+    testRuntimeOnly "org.apache.logging.log4j:log4j-core:${log4jVersion}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter-params:${junitVersion}"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+}
+
+apply from: rootProject.file('gradle/publishing.gradle')
+publishing {
+    publications {
+        library(MavenPublication) {
+            pom {
+                description = 'Writing RocksDB SST files directly'
+            }
+        }
+    }
+}

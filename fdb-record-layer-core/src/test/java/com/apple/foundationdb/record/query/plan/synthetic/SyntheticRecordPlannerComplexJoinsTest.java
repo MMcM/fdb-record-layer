@@ -44,7 +44,6 @@ import java.util.List;
 import static com.apple.foundationdb.record.metadata.Key.Expressions.field;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Tests for {@link SyntheticRecordPlanner} regarding more complex join capabilities.
@@ -62,7 +61,7 @@ public class SyntheticRecordPlannerComplexJoinsTest extends AbstractSyntheticRec
         clique.addJoin("type_b", "type_c_rec_no", "type_c", "rec_no");
         clique.addJoin("type_c", "type_a_rec_no", "type_a", "rec_no");
 
-        fail("random test failure");
+        //fail("random test failure");
 
         try (FDBRecordContext context = openContext()) {
             final FDBRecordStore recordStore = recordStoreBuilder.setContext(context).create();

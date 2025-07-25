@@ -950,6 +950,12 @@ public class DelegatingVisitor<D extends TypedVisitor> implements TypedVisitor {
 
     @Nonnull
     @Override
+    public QueryPlan.LogicalQueryPlan visitDistributeStatement(@Nonnull RelationalParser.DistributeStatementContext ctx) {
+        return getDelegate().visitDistributeStatement(ctx);
+    }
+
+    @Nonnull
+    @Override
     public Object visitDescribeStatements(@Nonnull RelationalParser.DescribeStatementsContext ctx) {
         return getDelegate().visitDescribeStatements(ctx);
     }

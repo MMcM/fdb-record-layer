@@ -44,6 +44,11 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
 
     private final boolean isForExplain;
 
+    @Nullable
+    private final String distributionDestination;
+
+    private final boolean distributeAsText;
+
     private final int parameterHash;
 
     @Nonnull
@@ -53,10 +58,13 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
                                             @Nullable byte[] continuation,
                                             int parameterHash,
                                             boolean isForExplain,
+                                            @Nullable final String distributionDestination, final boolean distributeAsText,
                                             @Nonnull final PlanHashable.PlanHashMode planHashMode) {
         this.literals = literals;
         this.continuation = continuation;
         this.isForExplain = isForExplain;
+        this.distributionDestination = distributionDestination;
+        this.distributeAsText = distributeAsText;
         this.parameterHash = parameterHash;
         this.planHashMode = planHashMode;
     }
@@ -90,6 +98,17 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
         return isForExplain;
     }
 
+    @Nullable
+    @Override
+    public String getDistributeDestination() {
+        return distributionDestination;
+    }
+
+    @Override
+    public boolean isDistributeAsText() {
+        return distributeAsText;
+    }
+
     @Nonnull
     @Override
     public PlanHashable.PlanHashMode getPlanHashMode() {
@@ -106,6 +125,11 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
         private final Literals.Builder literalsBuilder;
 
         private boolean isForExplain;
+
+        @Nullable
+        private String distributeDestination;
+
+        private boolean distributeAsText;
 
         @Nullable
         private byte[] continuation;
@@ -147,6 +171,13 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
         }
 
         @Nonnull
+        public Builder setDistributeDestination(@Nullable String distributeDestination, boolean distributeAsText) {
+            this.distributeDestination = distributeDestination;
+            this.distributeAsText = distributeAsText;
+            return this;
+        }
+
+        @Nonnull
         public Builder setPlanHashMode(@Nonnull PlanHashable.PlanHashMode planHashMode) {
             this.planHashMode = planHashMode;
             return this;
@@ -155,7 +186,7 @@ public final class NormalizedQueryExecutionContext implements QueryExecutionCont
         @Nonnull
         public NormalizedQueryExecutionContext build() {
             return new NormalizedQueryExecutionContext(literalsBuilder.build(), continuation,
-                    parameterHash, isForExplain,
+                    parameterHash, isForExplain, distributeDestination, distributeAsText,
                     Objects.requireNonNull(planHashMode));
         }
     }

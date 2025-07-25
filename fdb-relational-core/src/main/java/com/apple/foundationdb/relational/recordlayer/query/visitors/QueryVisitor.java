@@ -608,6 +608,16 @@ public final class QueryVisitor extends DelegatingVisitor<BaseVisitor> {
 
     @Nonnull
     @Override
+    public QueryPlan.LogicalQueryPlan visitDistributeStatement(@Nonnull RelationalParser.DistributeStatementContext ctx) {
+        getDelegate().getPlanGenerationContext().setDistributeDestination(SemanticAnalyzer.normalizeString(ctx.destination.getText(), true),
+                ctx.TEXT() != null);
+        final var logicalOperator = Assert.castUnchecked(ctx.query().accept(this), LogicalOperator.class);
+        final var semanticStructType = logicalOperator.getOutput().getStructType();
+        return QueryPlan.LogicalQueryPlan.of(logicalOperator.getQuantifier().getRangesOver().get(), getDelegate().getPlanGenerationContext(), getDelegate().getPlanGenerationContext().getQuery(), semanticStructType);
+    }
+
+    @Nonnull
+    @Override
     public LogicalOperator visitDescribeStatements(@Nonnull RelationalParser.DescribeStatementsContext ctx) {
         return parseChild(ctx);
     }

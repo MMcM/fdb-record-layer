@@ -45,7 +45,6 @@ import com.apple.foundationdb.record.query.plan.cascades.explain.PlannerGraphVis
 import com.apple.foundationdb.record.query.plan.cascades.expressions.RelationalExpression;
 import com.apple.foundationdb.record.query.plan.cascades.predicates.CompatibleTypeEvolutionPredicate;
 import com.apple.foundationdb.record.query.plan.cascades.predicates.DatabaseObjectDependenciesPredicate;
-import com.apple.foundationdb.record.query.plan.cascades.explain.ExplainPlanVisitor;
 import com.apple.foundationdb.record.query.plan.cascades.typing.Type;
 import com.apple.foundationdb.record.query.plan.cascades.typing.TypeRepository;
 import com.apple.foundationdb.record.query.plan.cascades.typing.Typed;
@@ -68,6 +67,7 @@ import com.apple.foundationdb.relational.api.exceptions.RelationalException;
 import com.apple.foundationdb.relational.api.metadata.DataType;
 import com.apple.foundationdb.relational.api.metrics.RelationalMetric;
 import com.apple.foundationdb.relational.continuation.CompiledStatement;
+import com.apple.foundationdb.relational.distribution.DistributedQuery;
 import com.apple.foundationdb.relational.recordlayer.ArrayRow;
 import com.apple.foundationdb.relational.recordlayer.ContinuationImpl;
 import com.apple.foundationdb.relational.recordlayer.EmbeddedRelationalConnection;
@@ -83,11 +83,19 @@ import com.apple.foundationdb.relational.util.Assert;
 import com.google.common.base.Suppliers;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
+import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
+import com.google.protobuf.TextFormat;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.Struct;
 import java.util.ArrayList;
@@ -265,7 +273,10 @@ public abstract class QueryPlan extends Plan<RelationalResultSet> implements Typ
                         executionContext.metricCollector.increment(RelationalMetric.RelationalCount.CONTINUATION_REJECTED);
                         throw ExceptionUtil.toRelationalException(ipbe);
                     }
-                    if (queryExecutionContext.isForExplain()) {
+                    if (queryExecutionContext.getDistributeDestination() != null) {
+                        return executeDistribute(queryExecutionContext.getDistributeDestination(), queryExecutionContext.isDistributeAsText(),
+                                recordLayerSchema, executionContext, parsedContinuation);
+                    } else if (queryExecutionContext.isForExplain()) {
                         return executeExplain(parsedContinuation, executionContext);
                     } else {
                         return executePhysicalPlan(recordLayerSchema, typedEvaluationContext, executionContext, parsedContinuation);
@@ -313,6 +324,55 @@ public abstract class QueryPlan extends Plan<RelationalResultSet> implements Typ
             } catch (RelationalException ex) {
                 return Optional.empty();
             }
+        }
+
+        @Nonnull
+        private RelationalResultSet executeDistribute(@Nonnull String destination, boolean asText, final RecordLayerSchema recordLayerSchema,
+                                                      @Nonnull ExecutionContext executionContext, @Nonnull ContinuationImpl parsedContinuation) throws RelationalException {
+            final var distributedStructType = DataType.StructType.from(
+                    "DISTRIBUTED", List.of(
+                            DataType.StructType.Field.from("DESTINATION", DataType.Primitives.STRING.type(), 0)),
+                    true);
+
+            final var serializationContext = new PlanSerializationContext(new DefaultPlanSerializationRegistry(), currentPlanHashMode);
+            final var literals = queryExecutionContext.getLiterals();
+            final var compiledStatement = CompiledStatement.newBuilder()
+                    .setPlanSerializationMode(queryExecutionContext.getPlanHashMode().name())
+                    .setPlan(recordQueryPlan.toRecordQueryPlanProto(serializationContext));
+
+            int i = 0;
+            for (final var orderedLiteral : literals.getOrderedLiterals()) {
+                final var orderedLiteralProto = orderedLiteral.toProto(serializationContext, i);
+                if (orderedLiteral.isQueryLiteral()) {
+                    compiledStatement.addExtractedLiterals(orderedLiteralProto);
+                } else {
+                    compiledStatement.addArguments(orderedLiteralProto);
+                }
+                i++;
+            }
+
+            final FDBRecordStoreBase<?> fdbRecordStore = recordLayerSchema.loadStore().unwrap(FDBRecordStoreBase.class);
+
+            final var distribution = DistributedQuery.newBuilder()
+                    .setSubspace(ByteString.copyFrom(fdbRecordStore.getSubspaceProvider().getSubspace(fdbRecordStore.getContext()).pack()))
+                    .setMetaData(fdbRecordStore.getRecordMetaData().toProto())
+                    .setCompiledStatement(compiledStatement)
+                    .build();
+            try (OutputStream fstr = new FileOutputStream(destination)) {
+                if (asText) {
+                    try (Writer writer = new OutputStreamWriter(fstr, StandardCharsets.UTF_8)) {
+                        TextFormat.printer().print(distribution, writer);
+                        writer.flush();
+                    }
+                } else {
+                    distribution.writeTo(fstr);
+                }
+            } catch (IOException ex) {
+                throw new RelationalException(ErrorCode.INVALID_PATH, ex);
+            }
+            return new IteratorResultSet(RelationalStructMetaData.of(distributedStructType),
+                                         Collections.singleton(new ArrayRow(destination)).iterator(),
+                                         0);
         }
 
         @Nonnull

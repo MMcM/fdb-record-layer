@@ -464,6 +464,7 @@ DIRECTORY:                           'DIRECTORY';
 DISABLE:                             'DISABLE';
 DISCARD:                             'DISCARD';
 DISK:                                'DISK';
+DISTRIBUTE:                          'DISTRIBUTE';
 DO:                                  'DO';
 DUMPFILE:                            'DUMPFILE';
 DUPLICATE:                           'DUPLICATE';

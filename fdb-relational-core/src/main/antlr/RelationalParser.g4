@@ -84,6 +84,7 @@ utilityStatement
     : simpleDescribeStatement 
     | fullDescribeStatement
     | helpStatement 
+    | distributeStatement
     ;
 
 
@@ -725,6 +726,10 @@ fullDescribeStatement
 
 helpStatement
     : HELP STRING_LITERAL
+    ;
+
+distributeStatement
+    : DISTRIBUTE outputFormat=(TEXT | BINARY)? destination=STRING_LITERAL query
     ;
 
 // details

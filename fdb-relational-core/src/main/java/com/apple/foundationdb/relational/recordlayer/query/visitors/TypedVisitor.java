@@ -547,6 +547,10 @@ public interface TypedVisitor extends RelationalParserVisitor<Object> {
 
     @Nonnull
     @Override
+    QueryPlan.LogicalQueryPlan visitDistributeStatement(@Nonnull RelationalParser.DistributeStatementContext ctx);
+
+    @Nonnull
+    @Override
     Object visitDescribeStatements(@Nonnull RelationalParser.DescribeStatementsContext ctx);
 
     @Nonnull

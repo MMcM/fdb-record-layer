@@ -364,6 +364,7 @@ public final class PlanGenerator {
                 ast.getQuery(),
                 ast.getQueryCacheKey().getCanonicalQueryString(), Objects.requireNonNull(continuation.getBindingHash()));
         planGenerationContext.setForExplain(ast.getQueryExecutionContext().isForExplain());
+        planGenerationContext.setDistributeDestination(ast.getQueryExecutionContext().getDistributeDestination(), ast.getQueryExecutionContext().isDistributeAsText());
         Arrays.stream(orderedLiterals).forEach(literal -> planGenerationContext.getLiteralsBuilder().addLiteral(literal));
         planGenerationContext.setContinuation(continuationProto);
         final var continuationPlanConstraint =

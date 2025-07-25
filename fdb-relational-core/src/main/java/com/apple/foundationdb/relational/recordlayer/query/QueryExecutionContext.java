@@ -60,6 +60,11 @@ public interface QueryExecutionContext {
 
     boolean isForExplain(); // todo (yhatem) remove.
 
+    @Nullable
+    String getDistributeDestination();
+
+    boolean isDistributeAsText();
+
     @Nonnull
     PlanHashable.PlanHashMode getPlanHashMode();
 }

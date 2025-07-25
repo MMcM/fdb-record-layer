@@ -1034,6 +1034,12 @@ public class BaseVisitor extends RelationalParserBaseVisitor<Object> implements 
 
     @Nonnull
     @Override
+    public QueryPlan.LogicalQueryPlan visitDistributeStatement(@Nonnull RelationalParser.DistributeStatementContext ctx) {
+        return queryVisitor.visitDistributeStatement(ctx);
+    }
+
+    @Nonnull
+    @Override
     public Object visitDescribeStatements(@Nonnull RelationalParser.DescribeStatementsContext ctx) {
         return visitChildren(ctx);
     }

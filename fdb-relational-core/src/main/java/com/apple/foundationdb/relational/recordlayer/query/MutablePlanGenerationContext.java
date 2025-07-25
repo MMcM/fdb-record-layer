@@ -93,6 +93,10 @@ public class MutablePlanGenerationContext implements QueryExecutionContext {
     private boolean forExplain;
 
     @Nullable
+    private String distributeDestination;
+    private boolean distributeAsText;
+
+    @Nullable
     private byte[] continuation;
 
     @Nonnull
@@ -355,6 +359,16 @@ public class MutablePlanGenerationContext implements QueryExecutionContext {
         return forExplain;
     }
 
+    @Override
+    @Nullable
+    public String getDistributeDestination() {
+        return distributeDestination;
+    }
+
+    @Override
+    public boolean isDistributeAsText() {
+        return distributeAsText;
+    }
 
     @Nonnull
     public QueryPlanConstraint getPlanConstraintsForLiteralReferences() {
@@ -389,6 +403,11 @@ public class MutablePlanGenerationContext implements QueryExecutionContext {
 
     public void setForExplain(boolean forExplain) {
         this.forExplain = forExplain;
+    }
+
+    public void setDistributeDestination(@Nullable String distributeDestination, boolean distributeAsText) {
+        this.distributeDestination = distributeDestination;
+        this.distributeAsText = distributeAsText;
     }
 
     @Nonnull

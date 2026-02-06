@@ -223,6 +223,7 @@ class OnlineIndexerMutualTest extends OnlineIndexerTest  {
         scrubAndValidate(indexes);
     }
 
+    @SuppressWarnings("deprecation")
     int oneThreadIndexing(List<Index> indexes, FDBStoreTimer callerTimer, List<Tuple> boundaries) {
         FDBRecordStoreTestBase.RecordMetaDataHook hook = allIndexesHook(indexes);
         openSimpleMetaData(hook);

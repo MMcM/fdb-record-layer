@@ -27,6 +27,7 @@ import com.apple.foundationdb.record.PlanSerializationContext;
 import com.apple.foundationdb.record.RecordCoreException;
 import com.apple.foundationdb.record.RecordCursor;
 import com.apple.foundationdb.record.RecordMetaData;
+import com.apple.foundationdb.record.RecordMetaDataProto;
 import com.apple.foundationdb.record.provider.foundationdb.FDBRecordStoreBase;
 import com.apple.foundationdb.record.query.IndexQueryabilityFilter;
 import com.apple.foundationdb.record.query.plan.QueryPlanConstraint;
@@ -41,6 +42,7 @@ import com.apple.foundationdb.record.query.plan.cascades.events.PlannerEvent.Loc
 import com.apple.foundationdb.record.query.plan.cascades.events.PlannerEventStats;
 import com.apple.foundationdb.record.query.plan.cascades.events.PlannerEventStatsMaps;
 import com.apple.foundationdb.record.query.plan.cascades.events.TransformRuleCallPlannerEvent;
+import com.apple.foundationdb.record.query.plan.cascades.explain.ExplainPlanVisitor;
 import com.apple.foundationdb.record.query.plan.cascades.explain.PlannerGraphVisitor;
 import com.apple.foundationdb.record.query.plan.cascades.expressions.RelationalExpression;
 import com.apple.foundationdb.record.query.plan.cascades.predicates.CompatibleTypeEvolutionPredicate;
@@ -84,6 +86,8 @@ import com.google.common.base.Suppliers;
 import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.ByteString;
+import com.google.protobuf.DescriptorProtos;
+import com.google.protobuf.Descriptors;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import com.google.protobuf.TextFormat;
@@ -100,13 +104,15 @@ import java.sql.SQLException;
 import java.sql.Struct;
 import java.util.ArrayList;
 import java.util.Collections;
-
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static com.apple.foundationdb.record.query.plan.cascades.properties.UsedTypesProperty.usedTypes;
 
@@ -355,7 +361,7 @@ public abstract class QueryPlan extends Plan<RelationalResultSet> implements Typ
 
             final var distribution = DistributedQuery.newBuilder()
                     .setSubspace(ByteString.copyFrom(fdbRecordStore.getSubspaceProvider().getSubspace(fdbRecordStore.getContext()).pack()))
-                    .setMetaData(fdbRecordStore.getRecordMetaData().toProto())
+                    .setMetaData(distributeMetaData(fdbRecordStore.getRecordMetaData()))
                     .setCompiledStatement(compiledStatement)
                     .build();
             try (OutputStream fstr = new FileOutputStream(destination)) {
@@ -373,6 +379,53 @@ public abstract class QueryPlan extends Plan<RelationalResultSet> implements Typ
             return new IteratorResultSet(RelationalStructMetaData.of(distributedStructType),
                                          Collections.singleton(new ArrayRow(destination)).iterator(),
                                          0);
+        }
+
+        private RecordMetaDataProto.MetaData distributeMetaData(@Nonnull RecordMetaData metaData) {
+            final RecordMetaDataProto.MetaData.Builder metaDataProto = metaData.toProto(new Descriptors.FileDescriptor[0]).toBuilder();
+            final Set<String> addedDependencies = new HashSet<>();
+            final Map<String, DescriptorProtos.FileDescriptorProto.Builder> availableDependencies =
+                    metaDataProto.getDependenciesBuilderList().stream().collect(Collectors.toMap(DescriptorProtos.FileDescriptorProto.Builder::getName, Function.identity()));
+            metaDataProto.clearDependencies();
+            distributeFileProto(metaDataProto.getRecordsBuilder(), metaDataProto, addedDependencies, availableDependencies);
+            return metaDataProto.build();
+        }
+
+        private void distributeFileProto(@Nonnull DescriptorProtos.FileDescriptorProto.Builder fileProto,
+                                         RecordMetaDataProto.MetaData.Builder metaDataProto,
+                                         @Nonnull Set<String> addedDependencies,
+                                         @Nonnull Map<String, DescriptorProtos.FileDescriptorProto.Builder> availableDependencies) {
+            for (String dependency : fileProto.getDependencyList()) {
+                if (!addedDependencies.contains(dependency)) {
+                    final DescriptorProtos.FileDescriptorProto.Builder dependencyProto = availableDependencies.get(dependency);
+                    if (dependencyProto != null) {
+                        distributeFileProto(dependencyProto, metaDataProto, addedDependencies, availableDependencies);
+                        metaDataProto.addDependencies(dependencyProto);
+                        addedDependencies.add(dependency);
+                    }
+                }
+            }
+            for (DescriptorProtos.DescriptorProto.Builder messageProto : fileProto.getMessageTypeBuilderList()) {
+                distributeMessageProto(messageProto);
+            }
+            for (DescriptorProtos.FieldDescriptorProto.Builder extensionProto : fileProto.getExtensionBuilderList()) {
+                distributeFieldProto(extensionProto);
+            }
+        }
+
+        private void distributeMessageProto(final DescriptorProtos.DescriptorProto.Builder messageProto) {
+            for (DescriptorProtos.FieldDescriptorProto.Builder fieldProto : messageProto.getFieldBuilderList()) {
+                distributeFieldProto(fieldProto);
+            }
+            for (DescriptorProtos.DescriptorProto.Builder nestedProto : messageProto.getNestedTypeBuilderList()) {
+                distributeMessageProto(nestedProto);
+            }
+        }
+
+        private static void distributeFieldProto(final DescriptorProtos.FieldDescriptorProto.Builder fieldProto) {
+            if (!fieldProto.hasJsonName()) {
+                fieldProto.setJsonName(fieldProto.getName());
+            }
         }
 
         @Nonnull
